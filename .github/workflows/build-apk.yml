@@ -1,0 +1,86 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Extract Zip Project
+        run: |
+          for z in *.zip; do
+            if [ -f "$z" ]; then
+              unzip -o "$z" -d unzipped_project
+              rm "$z"
+              # Agar zip ke andar ek single main folder hai toh uske andar ki files bahar layein
+              shopt -s dotglob
+              if [ $(ls -1 unzipped_project | wc -l) -eq 1 ] && [ -d "unzipped_project/$(ls -1 unzipped_project)" ]; then
+                SUBDIR=$(ls -1 unzipped_project)
+                cp -r unzipped_project/"$SUBDIR"/* .
+              else
+                cp -r unzipped_project/* .
+              fi
+              rm -rf unzipped_project
+            fi
+          done
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Build APK
+        run: |
+          if [ -f "gradlew" ]; then
+            chmod +x gradlew
+            ./gradlew assembleDebug
+          elif [ -f "android/gradlew" ]; then
+            cd android
+            chmod +x gradlew
+            ./gradlew assembleDebug
+          else
+            if [ -f package.json ]; then
+              npm install
+              npm run build --if-present
+            else
+              npm init -y
+            fi
+            
+            if [ -d "dist" ]; then
+              WEB_DIR="dist"
+            elif [ -d "build" ]; then
+              WEB_DIR="build"
+            else
+              mkdir -p www
+              find . -maxdepth 1 -type f \( -name "*.html" -o -name "*.js" -o -name "*.css" -o -name "*.png" -o -name "*.json" \) -exec cp {} www/ \;
+              WEB_DIR="www"
+            fi
+
+            npm install @capacitor/core @capacitor/cli @capacitor/android
+            npx cap init "RaviFinancialTracker" "com.ravi.financialtracker" --web-dir "$WEB_DIR"
+            npx cap add android
+            npx cap sync
+            cd android
+            chmod +x gradlew
+            ./gradlew assembleDebug
+          fi
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ravi-Financial-Tracker-APK
+          path: |
+            **/build/outputs/apk/debug/*.apk
